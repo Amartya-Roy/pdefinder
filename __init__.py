@@ -9,5 +9,8 @@ from .core import (
     extract_terms_from_pde,
     llm_get_coefficients,
     verify_llm,
-    run_pde_finder  # the main pipeline function
+    run_ns_finder,
+    run_nls_finder,
+    run_pde_finder # the main pipeline function
 )
+

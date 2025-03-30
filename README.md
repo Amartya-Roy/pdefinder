@@ -1,9 +1,7 @@
+Below is a description of our package
 
 
-```markdown
-# pdefinder
-
-**pdefinder** is a Python package for discovering partial differential equations (PDEs) from data using data-driven techniques. The package implements methods inspired by PDE-FIND and includes utilities for building candidate libraries, computing numerical derivatives, performing sparse regression, and optimizing candidate coefficients.
+`pdefinder` is a Python package for discovering partial differential equations (PDEs) from data using data-driven techniques. The package implements methods inspired by PDE-FIND and includes utilities for building candidate libraries, computing numerical derivatives, performing sparse regression, and optimizing candidate coefficients. 
 
 ## Features
 
@@ -19,7 +17,7 @@
 Clone the repository and install the package locally:
 
 ```bash
-git clone https://github.com/yourusername/pdefinder.git
+git clone https://github.com/Amartya-Roy/pdefinder.git
 cd pdefinder
 pip install .
 ```
@@ -38,9 +36,10 @@ pip install dist/pdefinder-0.1.0-py3-none-any.whl
 You can run the PDE discovery pipeline from the command line. For example:
 
 ```bash
-pdefinder --dataset KS --P 5 --D 5 --epochs 1000
+pdefinder --dataset KS --data_dir /path/to/data --P 5 --D 5 --epochs 1000
 ```
 
+  
 ### Python API
 
 Import and run the main function in your own script:
@@ -49,15 +48,30 @@ Import and run the main function in your own script:
 from pdefinder import run_pde_finder
 
 # Run the PDE discovery pipeline with custom parameters.
-w_final = run_pde_finder(dataset='KS', P=5, D=5, num_epochs=1000)
+w_final, pde_expression = run_pde_finder(
+    dataset='KS',
+    P=5,
+    D=5,
+    num_epochs=1000,
+    data_dir='/path/to/data',
+    pde_type='default',         
+    llm_initial='my_llm',         # Identifier for the initial LLM
+    llm_verification='my_llm'     # Identifier for the verification LLM
+)
+
+print("Optimized Coefficients:", w_final)
+print("Discovered PDE:", pde_expression)
 ```
 
 ### Parameters
 
-- **dataset**: Name of the dataset to use (e.g., `KS` for Kuramoto-Sivashinsky, `Burgers`, or `chafee-infante`).
-- **P**: Maximum polynomial power to include in the candidate library.
-- **D**: Maximum derivative order to include.
-- **num_epochs**: Number of epochs for the PyTorch optimization step.
+- **dataset**: The dataset to use.(`.mat` or `.npy` format)
+- **P**: Maximum polynomial power to include in the candidate library (default pipeline).
+- **D**: Maximum derivative order to include (default pipeline).
+- **num_epochs**: Number of epochs for the PyTorch optimization step (default pipeline).
+- **data_dir**: Directory where the dataset files are located.
+- **llm_initial**: Identifier for the language model used to generate initial coefficient guesses.
+- **llm_verification**: Identifier for the language model used for verification.
 
 ## Dependencies
 
@@ -76,12 +90,18 @@ pip install numpy scipy torch openai
 
 ## License
 
-This project is licensed under the MIT License. 
+This project is licensed under the MIT License.
+
 ## Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request on GitHub for any bug reports, feature requests, or improvements.
 
 ## Acknowledgments
 
-This package is inspired by recent advances in data-driven PDE discovery methods. Special thanks to Soumya Mallick who helped me thinking about this idea. 
+This package is inspired by recent advances in data-driven PDE discovery methods. Special thanks to `Soumya Mallick` who helped me thinking about this idea.
+
+## Repository
+
+For more information, visit the GitHub repository:  
+[https://github.com/Amartya-Roy/pdefinder](https://github.com/Amartya-Roy/pdefinder)
 ```

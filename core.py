@@ -10,6 +10,7 @@ import re
 import json
 import torch
 from openai import OpenAI
+from np import real
 import scipy
 import itertools
 import operator
@@ -464,21 +465,139 @@ def extract_terms_from_pde(pde_str):
     terms = re.findall(r'[-+]?\d*\.\d+\s*([a-zA-Z0-9_{}\^]+)', pde_str)
     return terms
 
-def data_load(dataset):
+def load_ns_data(data_dir="."):
+
+
+    data = scipy.io.loadmat(f"{data_dir}/Vorticity_ALL.mat")        
+    steps = 151
+    n = 449
+    m = 199
+    dt = 0.2
+    dx = 0.02
+    dy = 0.02
+    
+    xmin = 100
+    xmax = 425
+    ymin = 15
+    ymax = 185 
+    W = data['VORTALL'].reshape(n,m,steps)   # vorticity
+    U = data['UALL'].reshape(n,m,steps)      # x-component of velocity
+    V = data['VALL'].reshape(n,m,steps)      # y-component of velocity  
+    W = W[xmin:xmax,ymin:ymax,:]
+    U = U[xmin:xmax,ymin:ymax,:]
+    V = V[xmin:xmax,ymin:ymax,:]
+    n,m,steps = W.shape
+
+    np.random.seed(0)
+
+    num_xy = 2000
+    num_t = 50
+    num_points = num_xy * num_t
+    boundary = 5
+    boundary_x = 10
+    points = {}
+    count = 0
+
+    for p in range(num_xy):
+        x = np.random.choice(np.arange(boundary_x,n-boundary_x),1)[0]
+        y = np.random.choice(np.arange(boundary,m-boundary),1)[0]
+        for t in range(num_t):
+            points[count] = [x,y,2*t+12]
+            count = count + 1
+
+    # Take up to second order derivatives.
+    w = np.zeros((num_points,1))
+    u = np.zeros((num_points,1))
+    v = np.zeros((num_points,1))
+    wt = np.zeros((num_points,1))
+    wx = np.zeros((num_points,1))
+    wy = np.zeros((num_points,1))
+    wxx = np.zeros((num_points,1))
+    wxy = np.zeros((num_points,1))
+    wyy = np.zeros((num_points,1))
+
+    N = 2*boundary-1  # odd number of points to use in fitting
+    Nx = 2*boundary_x-1  # odd number of points to use in fitting
+    deg = 5 # degree of polynomial to use
+    # 
+    i = 0
+    for p in points.keys():
+        i+=1
+        [x,y,t] = points[p]
+        w[p] = W[x,y,t]
+        u[p] = U[x,y,t]
+        v[p] = V[x,y,t]
+        
+        wt[p] = PolyDiffPoint(W[x,y,t-(N-1)//2:t+(N+1)//2], np.arange(N)*dt, deg, 1)[0]
+        
+        x_diff = PolyDiffPoint(W[x-(Nx-1)//2:x+(Nx+1)//2,y,t], np.arange(Nx)*dx, deg, 2)
+        y_diff = PolyDiffPoint(W[x,y-(N-1)//2:y+(N+1)//2,t], np.arange(N)*dy, deg, 2)
+        wx[p] = x_diff[0]
+        wy[p] = y_diff[0]
+        
+        x_diff_yp = PolyDiffPoint(W[x-(Nx-1)//2:x+(Nx+1)//2,y+1,t], np.arange(Nx)*dx, deg, 2)
+        x_diff_ym = PolyDiffPoint(W[x-(Nx-1)//2:x+(Nx+1)//2,y-1,t], np.arange(Nx)*dx, deg, 2)
+        
+        wxx[p] = x_diff[1]
+        wxy[p] = (x_diff_yp[0]-x_diff_ym[0])/(2*dy)
+        wyy[p] = y_diff[1]
+    return w,u,v,wt, wx,wxx,wy, wyy, wxy
+
+def data_load(dataset, data_dir="."):
+    """
+    Loads the specified dataset from a given directory.
+    
+    Parameters:
+      dataset : str, name of the dataset ('chafee-infante', 'Burgers', 'KS', etc.)
+      data_dir: str, path to the directory where the dataset files are stored.
+    
+    Returns:
+      u, x, t : Data arrays loaded from the dataset.
+    """
     if dataset == 'chafee-infante':
-        u = np.load("chafee_infante_CI.npy")
-        x = np.load("chafee_infante_x.npy").reshape(-1,1)
-        t = np.load("chafee_infante_t.npy").reshape(-1,1)
+        u = np.load(f"{data_dir}/chafee_infante_CI.npy")
+        x = np.load(f"{data_dir}/chafee_infante_x.npy").reshape(-1,1)
+        t = np.load(f"{data_dir}/chafee_infante_t.npy").reshape(-1,1)
     elif dataset == 'Burgers':
-        data = sio.loadmat('burgers.mat')
+        data = sio.loadmat(f"{data_dir}/burgers.mat")
         u = data.get("usol")
         x = np.squeeze(data.get("x")).reshape(-1,1)
         t = np.squeeze(data.get("t")).reshape(-1,1)
     elif dataset == 'KS':
-        data = sio.loadmat('kuramoto_sivishinky.mat')
+        data = sio.loadmat(f"{data_dir}/kuramoto_sivishinky.mat")
         u = data['uu']
         x = data['x'][:,0].reshape(-1,1)
         t = data['tt'][0,:].reshape(-1,1)
+    elif dataset == 'kdv':
+        data = sio.loadmat(f"{data_dir}/kdv.mat")
+        u = real(data['usol'])
+        x = data['x'][0]
+        t = data['t'][:,0]
+
+    elif dataset == "fisher":
+    
+        data=scipy.io.loadmat(f"{data_dir}/fisher_nonlin_groundtruth.mat")
+
+        # D=data['D'] #0.02
+        # r=data['r'] #10
+        # K=data['K']
+        x=np.squeeze(data['x'])[1:-1].reshape(-1,1)[3:-3]
+        t=np.squeeze(data['t'])[1:-1].reshape(-1,1)[3:-3]
+        u=data['U'][3:-3,3:-3][1:-1,1:-1].T
+
+    # elif dataset == 'NS':
+    #     w,u,v,w_t, w_x, w_xx, w_y, w_yy, w_xy = load_ns_data()
+    #     # feature_dict['x'] = x_data.reshape(-1)
+    #     w_x = w_x.reshape(-1)
+    #     w_xx= w_xx.reshape(-1)
+    #     w_y = w_y.reshape(-1)
+    #     w_yy = w_yy.reshape(-1)
+    #     w = w.reshape(-1)
+    #     u = u.reshape(-1)
+    #     v = v.reshape(-1)
+    #     w_xy = w_xy.reshape(-1)
+    #     return w_t.reshape(-1,1), w,u,v,w_x, w_xx, w_y, w_yy, w_xy
+
     else:
         raise Exception("Unknown dataset")
     return u, x, t
@@ -495,7 +614,7 @@ def llm_get_coefficients(terms):
               f"the PDE terms {terms}. Do not include any additional text.")
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key="YOUR_API_KEY"  # Replace with your API key.
+        api_key="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"  # Replace with your API key.
     )
     completion = client.chat.completions.create(
         extra_headers={
@@ -525,7 +644,7 @@ def llm_get_coefficients(terms):
 def verify_llm(candidate_terms):
     client_verify = OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key="YOUR_API_KEY"  # Replace with your API key.
+        api_key="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"  # Replace with your API key.
     )
     prompt = (
         f"You are a PDE expert. Based solely on the candidate PDE terms {candidate_terms}, "
@@ -577,23 +696,164 @@ def verify_llm(candidate_terms):
     coeffs = [float(c) for c in coeffs_list[:len(candidate_terms)]]
     return "Unknown", np.array(coeffs)
 
+
+
+def run_nls_finder(u, dt, dx):
+    """
+    Runs the PDE discovery pipeline for NLS-type equations using build_Theta.
+    
+    Parameters:
+      u  : 2D numpy array of the PDE solution (assumed shape: (m, n))
+      dt : temporal grid spacing
+      dx : spatial grid spacing
+      
+    Returns:
+      w       : optimized coefficient vector (numpy array)
+      pde_str : string representation of the discovered PDE
+    """
+    # Determine dimensions (assumed: m rows, n columns)
+    m, n = u.shape
+
+    # Compute time and spatial derivatives using finite differences.
+    ut = np.zeros((m, n), dtype=np.complex64)
+    ux = np.zeros((m, n), dtype=np.complex64)
+    uxx = np.zeros((m, n), dtype=np.complex64)
+    uxxx = np.zeros((m, n), dtype=np.complex64)
+
+    for i in range(n):
+        ut[:, i] = FiniteDiff(u[:, i], dt, 1)
+    for i in range(m):
+        ux[i, :]   = FiniteDiff(u[i, :], dx, 1)
+        uxx[i, :]  = FiniteDiff(u[i, :], dx, 2)
+        uxxx[i, :] = FiniteDiff(u[i, :], dx, 3)
+
+    # Reshape the derivative arrays into column vectors (Fortran-order)
+    ut    = np.reshape(ut,    (m * n, 1), order='F')
+    ux    = np.reshape(ux,    (m * n, 1), order='F')
+    uxx   = np.reshape(uxx,   (m * n, 1), order='F')
+    uxxx  = np.reshape(uxxx,  (m * n, 1), order='F')
+
+    # Construct the derivative matrix: constant, first, second, and third derivatives.
+    X_ders = np.hstack([np.ones((m * n, 1)), ux, uxx, uxxx])
+
+    # Construct the data matrix from the solution and its absolute value.
+    X_data = np.hstack([np.reshape(u, (m * n, 1), order='F'),
+                        np.reshape(np.abs(u), (m * n, 1), order='F')])
+    # Descriptions for each derivative column.
+    derivatives_description = ['', 'u_{x}', 'u_{xx}', 'u_{xxx}']
+
+    # Build the candidate library using build_Theta (here using a polynomial up to degree 3).
+    X, rhs_des = build_Theta(X_data, X_ders, derivatives_description, 3,
+                             data_description=['u', '|u|'])
+
+    # Run sparse regression using STRidge to get the coefficient vector.
+    w = TrainSTRidge(X, ut, 10**-5, 500)
+    
+    # Print and return the discovered PDE.
+    print("PDE derived using STRidge for NLS-type equations")
+    pde_str = print_pde(w, rhs_des)
+    return w, pde_str
+
+def run_ns_finder(data_dir="."):
+    """
+    Runs the Navier-Stokes PDE discovery pipeline using the NS data loader.
+    
+    The NS data loader (via data_load('NS', data_dir)) is expected to return:
+      wt  : time derivative of vorticity w (as a column vector)
+      w   : vorticity (as a 1D array, reshaped to column)
+      u   : x-component of velocity
+      v   : y-component of velocity
+      wx, wxx, wy, wyy, wxy : corresponding spatial derivatives (all as 1D arrays)
+    
+    Returns:
+      A tuple (c, description) where 'c' is the optimized coefficient vector
+      and 'description' is the list of candidate term descriptions.
+    """
+    import numpy as np
+
+    # Load NS data using the edited data loader for dataset 'NS'
+    wt, w, u, v, wx, wxx, wy, wyy, wxy = data_load('NS', data_dir=data_dir)
+    
+    # Ensure that all outputs are reshaped to column vectors
+    wt = wt.reshape(-1, 1)
+    w = w.reshape(-1, 1)
+    u = u.reshape(-1, 1)
+    v = v.reshape(-1, 1)
+    wx = wx.reshape(-1, 1)
+    wxx = wxx.reshape(-1, 1)
+    wy = wy.reshape(-1, 1)
+    wyy = wyy.reshape(-1, 1)
+    wxy = wxy.reshape(-1, 1)
+    
+    num_points = w.shape[0]
+    
+    # Build the candidate library using build_Theta.
+    # X_data is built from [w, u, v].
+    # X_ders is built from a column of ones and the spatial derivatives.
+    X_data = np.hstack([w, u, v])
+    X_ders = np.hstack([np.ones((num_points, 1)), wx, wy, wxx, wxy, wyy])
+    X_ders_descr = ['', 'w_{x}', 'w_{y}', 'w_{xx}', 'w_{xy}', 'w_{yy}']
+    
+    # data_description corresponds to the columns in X_data.
+    X, description = build_Theta(X_data, X_ders, X_ders_descr, 2, data_description=['w', 'u', 'v'])
+    
+    print("Candidate terms for PDE:")
+    print(['1'] + description[1:])
+    
+    # Set STRidge parameters.
+    lam = 10**-5
+    d_tol = 5
+    c = TrainSTRidge(X, wt, lam, d_tol)
+    
+    print("Derived PDE:")
+    print_pde(c, description, ut='w_t')
+    
+    return c, description
+
+
 # ------------------------------
 # Main pipeline function
 # ------------------------------
 
-def run_pde_finder(dataset='KS', P=5, D=5, num_epochs=1000):
+def run_pde_finder(dataset='KS', P=5, D=5, num_epochs=1000, data_dir=".", pde_type='default', 
+                   llm_initial='default_llm', llm_verification='default_llm'):
     """
     Runs the PDE discovery pipeline.
     
     Parameters:
-      dataset    : string, dataset name (e.g., 'KS', 'Burgers', 'chafee-infante')
-      P          : int, maximum polynomial power to include in the candidate library
-      D          : int, maximum derivative order to include in the candidate library
-      num_epochs : int, number of epochs for PyTorch optimization
+      dataset         : string, dataset name (e.g., 'KS', 'Burgers', 'chafee-infante', 'NS')
+      P               : int, maximum polynomial power for candidate library (default pipeline)
+      D               : int, maximum derivative order for candidate library (default pipeline)
+      num_epochs      : int, number of epochs for PyTorch optimization (default pipeline)
+      data_dir        : str, directory path where dataset files are located
+      pde_type        : str, type of PDE pipeline to run; must be one of:
+                        'default' (regular pipeline), 'nls' or 'harmonic' (NLS/harmonic pipeline)
+      llm_initial     : str, identifier for the LLM used to generate initial coefficient guesses
+      llm_verification: str, identifier for the LLM used for verification
+       
+    Returns:
+      A tuple (w, pde_str) containing the optimized coefficient vector and PDE string.
     """
     print("Loading data...")
-    u, x, t = data_load(dataset)
+    # Case 1: Navier–Stokes dataset: trigger the NS pipeline.
+    if dataset.lower() == 'ns':
+        print("Using Navier–Stokes pipeline...")
+        return run_ns_finder(data_dir=data_dir)
+    
+    # For other datasets, load and subsample the data.
+    u, x, t = data_load(dataset, data_dir=data_dir)
     u, x, t = subsample_data(u, x, t, spatial_factor=4, temporal_factor=4)
+    
+    # Case 2: NLS/Harmonic pipeline: use run_nls_finder.
+    if pde_type.lower() in ['nls', 'harmonic']:
+        print("Using NLS/harmonic pipeline...")
+        dt = t[1] - t[0]
+        # For the NLS pipeline, we assume different spatial indexing.
+        dx = x[1] - x[0]
+        return run_nls_finder(u, dt, dx)
+    
+    # Case 3: Default pipeline.
+    print("Using default pipeline...")
     dt = t[1] - t[0]
     dx = x[2] - x[1]
     
@@ -615,8 +875,8 @@ def run_pde_finder(dataset='KS', P=5, D=5, num_epochs=1000):
     R_candidate_sub, Ut_sub = subsample_candidate_matrix(R_candidate, Ut, new_num_rows)
     print("Subsampled shape of R_candidate:", R_candidate_sub.shape)
     
-    # Get LLM initial coefficients.
-    w_llm = llm_get_coefficients(candidate_terms)
+    # Use the LLM to get initial coefficients.
+    w_llm = llm_get_coefficients(candidate_terms, llm_name=llm_initial)
     print("LLM initial guess for coefficients:", w_llm)
     num_candidate = R_candidate.shape[1]
     if w_llm.shape[0] != num_candidate:
@@ -624,7 +884,8 @@ def run_pde_finder(dataset='KS', P=5, D=5, num_epochs=1000):
         print("Using STRidge nonzero coefficients as initial guess.")
         w_llm = w_nonzero
     
-    pde_name, w_verified = verify_llm(candidate_terms)
+    # Get verified coefficients from the verification LLM.
+    pde_name, w_verified = verify_llm(candidate_terms, llm_name=llm_verification)
     print("Verified coefficients from second LLM:", (pde_name, w_verified))
     w_llm = w_verified
     
@@ -658,8 +919,11 @@ def run_pde_finder(dataset='KS', P=5, D=5, num_epochs=1000):
     
     w_updated = np.zeros_like(w)
     w_updated[nonzero_idx] = w_opt.reshape(w_updated[nonzero_idx].shape)
-    print_and_save_pde_func_final(w_updated, rhs_des, candidate_terms, w_verified, ut='u_t', file_path='optimized_pde.txt')
-    return w_updated
+    pde_str = print_and_save_pde_func_final(w_updated, rhs_des, candidate_terms, w_verified, ut='u_t', file_path='optimized_pde.txt')
+    return w_updated, pde_str
+
+
+
 
 if __name__ == "__main__":
     # For testing purposes, run with default parameters.
